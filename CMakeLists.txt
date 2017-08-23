@@ -38,6 +38,7 @@ endif()
 
 if( CPP14TEST )
     add_compile_options(-std=c++14)
+    add_definitions(-DCPP14TEST)
 endif()
 
 
