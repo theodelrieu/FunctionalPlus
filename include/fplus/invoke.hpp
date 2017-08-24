@@ -31,71 +31,207 @@ struct is_reference_wrapper : decltype(is_refwrap_test(std::declval<T>()))
 {
 };
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-conversion"
+
+#ifndef __clang__
+#if defined(__GNUC__) || defined(__GNUG__)
+#pragma GCC diagnostic ignored "-Wnoexcept-type"
+#endif
+#endif
+
+struct invoke_member_function_ref
+{
+};
+
+struct invoke_member_function_ptr
+{
+};
+
+struct invoke_member_object_ref
+{
+};
+
+struct invoke_member_object_ptr
+{
+};
+
+struct invoke_other
+{
+};
+
+template <typename T, typename U = typename std::decay<T>::type>
+struct remove_reference_wrapper
+{
+  using type = T;
+};
+
+template <typename T, typename U>
+struct remove_reference_wrapper<T, std::reference_wrapper<U>>
+{
+  using type = U&;
+};
+
+template <typename T>
+using remove_reference_wrapper_t = typename remove_reference_wrapper<T>::type;
+
 template <class Base, class T, class Derived, class... Args>
-inline auto invoke_impl(T Base::*pmf, Derived&& ref, Args&&... args) ->
+constexpr inline auto get_invoke_tag(T Base::*, Derived&&, Args&&...) ->
     typename std::enable_if<
         std::is_function<T>::value &&
             std::is_base_of<Base, typename std::decay<Derived>::type>::value,
-        decltype((std::forward<Derived>(ref).*
-                  pmf)(std::forward<Args>(args)...))>::type
+        invoke_member_function_ref>::type
 {
-  return (std::forward<Derived>(ref).*pmf)(std::forward<Args>(args)...);
+  return {};
 }
 
 template <class Base, class T, class RefWrap, class... Args>
-inline auto invoke_impl(T Base::*pmf, RefWrap&& ref, Args&&... args) ->
+constexpr inline auto get_invoke_tag(T Base::*, RefWrap&&, Args&&...) ->
     typename std::enable_if<
         std::is_function<T>::value &&
             is_reference_wrapper<typename std::decay<RefWrap>::type>::value,
-        decltype((ref.get().*pmf)(std::forward<Args>(args)...))>::type
+        invoke_member_function_ref>::type
 {
-  return (ref.get().*pmf)(std::forward<Args>(args)...);
+  return {};
 }
 
 template <class Base, class T, class Pointer, class... Args>
-inline auto invoke_impl(T Base::*pmf, Pointer&& ptr, Args&&... args) ->
+constexpr inline auto get_invoke_tag(T Base::*, Pointer&&, Args&&...) ->
     typename std::enable_if<
         std::is_function<T>::value &&
             !is_reference_wrapper<typename std::decay<Pointer>::type>::value &&
             !std::is_base_of<Base, typename std::decay<Pointer>::type>::value,
-        decltype(((*std::forward<Pointer>(ptr)).*
-                  pmf)(std::forward<Args>(args)...))>::type
+        invoke_member_function_ptr>::type
 {
-  return ((*std::forward<Pointer>(ptr)).*pmf)(std::forward<Args>(args)...);
+  return {};
 }
 
 template <class Base, class T, class Derived>
-inline auto invoke_impl(T Base::*pmd, Derived&& ref) -> typename std::enable_if<
-    !std::is_function<T>::value &&
-        std::is_base_of<Base, typename std::decay<Derived>::type>::value,
-    decltype(std::forward<Derived>(ref).*pmd)>::type
+constexpr inline auto get_invoke_tag(T Base::*, Derived &&) ->
+    typename std::enable_if<
+        !std::is_function<T>::value &&
+            std::is_base_of<Base, typename std::decay<Derived>::type>::value,
+        invoke_member_object_ref>::type
 {
-  return std::forward<Derived>(ref).*pmd;
+  return {};
 }
 
 template <class Base, class T, class RefWrap>
-inline auto invoke_impl(T Base::*pmd, RefWrap&& ref) -> typename std::enable_if<
-    !std::is_function<T>::value &&
-        is_reference_wrapper<typename std::decay<RefWrap>::type>::value,
-    decltype(ref.get().*pmd)>::type
+constexpr inline auto get_invoke_tag(T Base::*, RefWrap &&) ->
+    typename std::enable_if<
+        !std::is_function<T>::value &&
+            is_reference_wrapper<typename std::decay<RefWrap>::type>::value,
+        invoke_member_object_ref>::type
 {
-  return ref.get().*pmd;
+  return {};
 }
 
 template <class Base, class T, class Pointer>
-inline auto invoke_impl(T Base::*pmd, Pointer&& ptr) -> typename std::enable_if<
-    !std::is_function<T>::value &&
-        !is_reference_wrapper<typename std::decay<Pointer>::type>::value &&
-        !std::is_base_of<Base, typename std::decay<Pointer>::type>::value,
-    decltype((*std::forward<Pointer>(ptr)).*pmd)>::type
+constexpr inline auto get_invoke_tag(T Base::*, Pointer &&) ->
+    typename std::enable_if<
+        !std::is_function<T>::value &&
+            !is_reference_wrapper<typename std::decay<Pointer>::type>::value &&
+            !std::is_base_of<Base, typename std::decay<Pointer>::type>::value,
+        invoke_member_object_ptr>::type
 {
-  return (*std::forward<Pointer>(ptr)).*pmd;
+  return {};
 }
 
 template <class F, class... Args>
-inline auto invoke_impl(F&& f, Args&&... args) -> typename std::enable_if<
+constexpr inline auto get_invoke_tag(F&&, Args&&...) -> typename std::enable_if<
     !std::is_member_pointer<typename std::decay<F>::type>::value,
-    decltype(std::forward<F>(f)(std::forward<Args>(args)...))>::type
+    invoke_other>::type
+{
+  return {};
+}
+
+template <typename F, typename... Args>
+using get_invoke_tag_t =
+    decltype(get_invoke_tag(std::declval<F>(), std::declval<Args>()...));
+
+// noexcept check
+template <typename MemberObjRef, typename Object>
+constexpr inline bool is_call_noexcept(invoke_member_object_ref)
+{
+  return noexcept(
+      static_cast<remove_reference_wrapper_t<Object>>(std::declval<Object>()).*
+      std::declval<MemberObjRef>());
+}
+
+template <typename MemberObjPtr, typename ObjectPtr>
+constexpr inline bool is_call_noexcept(invoke_member_object_ptr)
+{
+  return noexcept((*std::declval<ObjectPtr>()).*std::declval<MemberObjPtr>());
+}
+
+template <typename MemberFunctionRef, typename Object, typename... Args>
+constexpr inline bool is_call_noexcept(invoke_member_function_ref)
+{
+  return noexcept(
+      (static_cast<remove_reference_wrapper_t<Object>>(std::declval<Object>()).*
+       std::declval<MemberFunctionRef>())(std::declval<Args>()...));
+}
+
+template <typename MemberFunctionPtr, typename ObjectPtr, typename... Args>
+constexpr inline bool is_call_noexcept(invoke_member_function_ptr)
+{
+  return noexcept(((*std::declval<ObjectPtr>()).*
+                   std::declval<MemberFunctionPtr>())(std::declval<Args>()...));
+}
+
+template <typename F, typename... Args>
+constexpr inline bool is_call_noexcept(invoke_other)
+{
+  return noexcept((std::declval<F>())(std::declval<Args>()...));
+}
+
+// invoke_impl
+
+template <typename MemberObjPtr, typename ObjectRef>
+constexpr auto invoke_impl(invoke_member_object_ref,
+                                  MemberObjPtr&& mObjPtr,
+                                  ObjectRef&& obj)
+    -> decltype(static_cast<remove_reference_wrapper_t<ObjectRef>&&>(obj).*
+                mObjPtr)
+{
+  return (static_cast<remove_reference_wrapper_t<ObjectRef>&&>(obj)).*mObjPtr;
+}
+
+template <typename MemberObjPtr, typename ObjectPtr>
+constexpr auto is_call_noexcept(invoke_member_object_ptr,
+                                       MemberObjPtr&& mObjPtr,
+                                       ObjectPtr&& obj)
+    -> decltype((*std::forward<ObjectPtr>(obj)).*mObjPtr)
+{
+  return ((*std::forward<ObjectPtr>(obj)).*mObjPtr);
+}
+
+template <typename MemberFunctionPtr, typename ObjectRef, typename... Args>
+constexpr inline auto invoke_impl(invoke_member_function_ref,
+                                  MemberFunctionPtr&& mFunPtr,
+                                  ObjectRef&& obj,
+                                  Args&&... args)
+    -> decltype((static_cast<remove_reference_wrapper_t<ObjectRef>&&>(obj).*
+                 mFunPtr)(std::forward<Args>(args)...))
+{
+  return (static_cast<remove_reference_wrapper_t<ObjectRef>&&>(obj).*
+          mFunPtr)(std::forward<Args>(args)...);
+}
+
+template <typename MemberFunctionPtr, typename ObjectPtr, typename... Args>
+constexpr inline auto invoke_impl(invoke_member_function_ptr,
+                                  MemberFunctionPtr&& mFunPtr,
+                                  ObjectPtr&& obj,
+                                  Args&&... args)
+    -> decltype((*std::forward<ObjectPtr>(obj).*
+                 mFunPtr)(std::forward<Args>(args)...))
+{
+  return (*std::forward<ObjectPtr>(obj).*mFunPtr)(std::forward<Args>(args)...);
+}
+
+template <typename F, typename... Args>
+constexpr inline auto invoke_impl(invoke_other, F&& f, Args&&... args)
+    -> decltype(std::forward<F>(f)(std::forward<Args>(args)...))
 {
   return std::forward<F>(f)(std::forward<Args>(args)...);
 }
@@ -106,37 +242,37 @@ struct invoke_result_impl
 };
 
 template <typename F, typename... Args>
-struct invoke_result_impl<decltype(void(invoke_impl(std::declval<F>(),
-                                                    std::declval<Args>()...))),
+struct invoke_result_impl<decltype(void(invoke_impl(
+                              std::declval<get_invoke_tag_t<F, Args...>>(),
+                              std::declval<F>(),
+                              std::declval<Args>()...))),
                           F,
                           Args...>
 {
   using type =
-      decltype(invoke_impl(std::declval<F>(), std::declval<Args>()...));
+      decltype(invoke_impl(std::declval<get_invoke_tag_t<F, Args...>>(),
+                           std::declval<F>(),
+                           std::declval<Args>()...));
 };
 
-template <class F, class... ArgTypes>
-struct invoke_result : invoke_result_impl<void, F, ArgTypes...>
+template <class F, class... Args>
+struct invoke_result : invoke_result_impl<void, F, Args...>
 {
 };
 
 template <class F, class... Args>
 using invoke_result_t = typename invoke_result<F, Args...>::type;
 
-// noexcept omitted on purpose, very tedious to adapt libstdc++ code
-// We could detect if C++17 is used and use the std::invoke directly.
-//
-// Otherwise, unless we want to forward noexcept-ness to every algorithm,
-// I don't see a good reason to implement is_nothrow_invocable{_r}.
-template <class F, class... ArgTypes>
-invoke_result_t<F, ArgTypes...> invoke(F&& f, ArgTypes&&... args)
-{
-  return invoke_impl(std::forward<F>(f), std::forward<ArgTypes>(args)...);
-}
-
 // Invoke useful traits (libstdc++ 7.1.0's implementation, ugly-case removed)
 template <typename Result, typename ReturnType, typename = void>
 struct is_invocable_impl : std::false_type
+{
+};
+
+template <typename F, typename... Args>
+struct is_noexcept : std::integral_constant<bool,
+                                            is_call_noexcept<F, Args...>(
+                                                get_invoke_tag_t<F, Args...>{})>
 {
 };
 
@@ -147,16 +283,43 @@ struct is_invocable_impl<Result, ReturnType, void_t<typename Result::type>>
 {
 };
 
-template <typename F, typename... ArgTypes>
+template <typename F, typename... Args>
 struct is_invocable
-    : is_invocable_impl<invoke_result<F, ArgTypes...>, void>::type
+    : is_invocable_impl<invoke_result<F, Args...>, void>::type
 {
 };
 
-template <typename ReturnType, typename F, typename... ArgTypes>
+template <typename ReturnType, typename F, typename... Args>
 struct is_invocable_r
-    : is_invocable_impl<invoke_result<F, ArgTypes...>, ReturnType>::type
+    : is_invocable_impl<invoke_result<F, Args...>, ReturnType>::type
 {
 };
+
+template <typename F, typename... Args>
+struct is_nothrow_invocable
+    : conjunction<is_invocable_impl<invoke_result<F, Args...>, void>,
+                  is_noexcept<F, Args...>>::type
+{
+};
+
+template <typename ReturnType, typename F, typename... Args>
+struct is_nothrow_invocable_r
+    : conjunction<is_invocable_impl<invoke_result<F, Args...>, ReturnType>,
+                  is_noexcept<F, Args...>>::type
+{
+};
+
+// invoke
+template <class F, class... Args>
+invoke_result_t<F, Args...> invoke(F&& f, Args&&... args) noexcept(
+    is_nothrow_invocable<F, Args...>::value)
+{
+  return invoke_impl(get_invoke_tag_t<F, Args...>{},
+                     std::forward<F>(f),
+                     std::forward<Args>(args)...);
+}
+
+#pragma GCC diagnostic pop
+
 }
 }
