@@ -12,10 +12,19 @@
 
 #include <fplus/meta.hpp>
 
+// borrowed to libc++
+#define FPLUS_INVOKE_RETURN(...)                         \
+  noexcept(noexcept(__VA_ARGS__))->decltype(__VA_ARGS__) \
+  {                                                      \
+    return __VA_ARGS__;                                  \
+  }
+
 namespace fplus
 {
 namespace detail
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnoexcept-type"
 // We need std::invoke to detect callable objects
 //
 // source:
@@ -31,74 +40,86 @@ struct is_reference_wrapper : decltype(is_refwrap_test(std::declval<T>()))
 {
 };
 
-template <class Base, class T, class Derived, class... Args>
-inline auto invoke_impl(T Base::*pmf, Derived&& ref, Args&&... args) ->
+template <
+    class Base,
+    class T,
+    class Derived,
+    class... Args,
     typename std::enable_if<
         std::is_function<T>::value &&
             std::is_base_of<Base, typename std::decay<Derived>::type>::value,
-        decltype((std::forward<Derived>(ref).*
-                  pmf)(std::forward<Args>(args)...))>::type
-{
-  return (std::forward<Derived>(ref).*pmf)(std::forward<Args>(args)...);
-}
+        int>::type = 0>
+inline auto invoke_impl(T Base::*pmf, Derived&& ref, Args&&... args)
+    FPLUS_INVOKE_RETURN((std::forward<Derived>(ref).*
+                         pmf)(std::forward<Args>(args)...))
 
-template <class Base, class T, class RefWrap, class... Args>
-inline auto invoke_impl(T Base::*pmf, RefWrap&& ref, Args&&... args) ->
+template <
+    class Base,
+    class T,
+    class RefWrap,
+    class... Args,
     typename std::enable_if<
         std::is_function<T>::value &&
             is_reference_wrapper<typename std::decay<RefWrap>::type>::value,
-        decltype((ref.get().*pmf)(std::forward<Args>(args)...))>::type
-{
-  return (ref.get().*pmf)(std::forward<Args>(args)...);
-}
+        int>::type = 0>
+inline auto invoke_impl(T Base::*pmf, RefWrap&& ref, Args&&... args)
+    FPLUS_INVOKE_RETURN((ref.get().*pmf)(std::forward<Args>(args)...))
 
-template <class Base, class T, class Pointer, class... Args>
-inline auto invoke_impl(T Base::*pmf, Pointer&& ptr, Args&&... args) ->
+template <
+    class Base,
+    class T,
+    class Pointer,
+    class... Args,
     typename std::enable_if<
         std::is_function<T>::value &&
             !is_reference_wrapper<typename std::decay<Pointer>::type>::value &&
             !std::is_base_of<Base, typename std::decay<Pointer>::type>::value,
-        decltype(((*std::forward<Pointer>(ptr)).*
-                  pmf)(std::forward<Args>(args)...))>::type
-{
-  return ((*std::forward<Pointer>(ptr)).*pmf)(std::forward<Args>(args)...);
-}
+        int>::type = 0>
+inline auto invoke_impl(T Base::*pmf, Pointer&& ptr, Args&&... args)
+    FPLUS_INVOKE_RETURN(((*std::forward<Pointer>(ptr)).*
+                         pmf)(std::forward<Args>(args)...))
 
-template <class Base, class T, class Derived>
-inline auto invoke_impl(T Base::*pmd, Derived&& ref) -> typename std::enable_if<
-    !std::is_function<T>::value &&
-        std::is_base_of<Base, typename std::decay<Derived>::type>::value,
-    decltype(std::forward<Derived>(ref).*pmd)>::type
-{
-  return std::forward<Derived>(ref).*pmd;
-}
+template <
+    class Base,
+    class T,
+    class Derived,
+    typename std::enable_if<
+        !std::is_function<T>::value &&
+            std::is_base_of<Base, typename std::decay<Derived>::type>::value,
+        int>::type = 0>
+inline auto invoke_impl(T Base::*pmd, Derived&& ref)
+    FPLUS_INVOKE_RETURN((std::forward<Derived>(ref).*pmd))
 
-template <class Base, class T, class RefWrap>
-inline auto invoke_impl(T Base::*pmd, RefWrap&& ref) -> typename std::enable_if<
-    !std::is_function<T>::value &&
-        is_reference_wrapper<typename std::decay<RefWrap>::type>::value,
-    decltype(ref.get().*pmd)>::type
-{
-  return ref.get().*pmd;
-}
+template <
+    class Base,
+    class T,
+    class RefWrap,
+    typename std::enable_if<
+        !std::is_function<T>::value &&
+            is_reference_wrapper<typename std::decay<RefWrap>::type>::value,
+        int>::type = 0>
+inline auto invoke_impl(T Base::*pmd, RefWrap&& ref)
+    FPLUS_INVOKE_RETURN((ref.get().*pmd))
 
-template <class Base, class T, class Pointer>
-inline auto invoke_impl(T Base::*pmd, Pointer&& ptr) -> typename std::enable_if<
-    !std::is_function<T>::value &&
-        !is_reference_wrapper<typename std::decay<Pointer>::type>::value &&
-        !std::is_base_of<Base, typename std::decay<Pointer>::type>::value,
-    decltype((*std::forward<Pointer>(ptr)).*pmd)>::type
-{
-  return (*std::forward<Pointer>(ptr)).*pmd;
-}
+template <
+    class Base,
+    class T,
+    class Pointer,
+    typename std::enable_if<
+        !std::is_function<T>::value &&
+            !is_reference_wrapper<typename std::decay<Pointer>::type>::value &&
+            !std::is_base_of<Base, typename std::decay<Pointer>::type>::value,
+        int>::type = 0>
+inline auto invoke_impl(T Base::*pmd, Pointer&& ptr)
+    FPLUS_INVOKE_RETURN((*std::forward<Pointer>(ptr)).*pmd)
 
-template <class F, class... Args>
-inline auto invoke_impl(F&& f, Args&&... args) -> typename std::enable_if<
-    !std::is_member_pointer<typename std::decay<F>::type>::value,
-    decltype(std::forward<F>(f)(std::forward<Args>(args)...))>::type
-{
-  return std::forward<F>(f)(std::forward<Args>(args)...);
-}
+template <class F,
+          class... Args,
+          typename std::enable_if<
+              !std::is_member_pointer<typename std::decay<F>::type>::value,
+              int>::type = 0>
+inline auto invoke_impl(F&& f, Args&&... args)
+    FPLUS_INVOKE_RETURN((std::forward<F>(f)(std::forward<Args>(args)...)))
 
 template <typename AlwaysVoid, typename, typename...>
 struct invoke_result_impl
@@ -129,7 +150,8 @@ using invoke_result_t = typename invoke_result<F, Args...>::type;
 // Otherwise, unless we want to forward noexcept-ness to every algorithm,
 // I don't see a good reason to implement is_nothrow_invocable{_r}.
 template <class F, class... ArgTypes>
-invoke_result_t<F, ArgTypes...> invoke(F&& f, ArgTypes&&... args)
+invoke_result_t<F, ArgTypes...> invoke(F&& f, ArgTypes&&... args) noexcept(
+    noexcept(invoke_impl(std::forward<F>(f), std::forward<ArgTypes>(args)...)))
 {
   return invoke_impl(std::forward<F>(f), std::forward<ArgTypes>(args)...);
 }
@@ -158,5 +180,8 @@ struct is_invocable_r
     : is_invocable_impl<invoke_result<F, ArgTypes...>, ReturnType>::type
 {
 };
+#pragma GCC diagnostic pop
 }
 }
+
+#undef FPLUS_INVOKE_RETURN
