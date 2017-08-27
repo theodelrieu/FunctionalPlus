@@ -21,70 +21,77 @@ namespace
 template <typename T>
 struct identity
 {
+  identity() = default;
   using type = T;
 };
 
 // Thanks to Louis Dionne and his master thesis.
 template <typename Ret, typename Class, typename... Args>
-auto cv_qualifiers(identity<Ret (Class::*)(Args...)>) {
-  return std::tuple<identity<Ret (Class::*)(Args...)>,
-                    identity<Ret (Class::*)(Args...) const>,
-                    identity<Ret (Class::*)(Args...) volatile>,
-                    identity<Ret (Class::*)(Args...) const volatile>>{};
+auto cv_qualifiers(identity<Ret (Class::*)(Args...)>)
+    -> std::tuple<identity<Ret (Class::*)(Args...)>,
+                  identity<Ret (Class::*)(Args...) const>,
+                  identity<Ret (Class::*)(Args...) volatile>,
+                  identity<Ret (Class::*)(Args...) const volatile>>
+{
+  return{};
 }
 
 template <typename Ret, typename Class, typename... Args>
 auto ref_qualifiers(identity<Ret (Class::*)(Args...)>)
+    -> std::tuple<identity<Ret (Class::*)(Args...) &>,
+                  identity<Ret (Class::*)(Args...) &&>>
 {
-  return std::tuple<identity<Ret (Class::*)(Args...)&>,
-                    identity<Ret (Class::*)(Args...) &&>>{};
+  return {};
 }
 
 template <typename Ret, typename Class, typename... Args>
 auto ref_qualifiers(identity<Ret (Class::*)(Args...) const>)
+    -> std::tuple<identity<Ret (Class::*)(Args...) const &>,
+                  identity<Ret (Class::*)(Args...) const &&>>
 {
-  return std::tuple<identity<Ret (Class::*)(Args...) const&>,
-                    identity<Ret (Class::*)(Args...) const &&>>{};
+  return {};
 }
 
 template <typename Ret, typename Class, typename... Args>
 auto ref_qualifiers(identity<Ret (Class::*)(Args...) volatile>)
+    -> std::tuple<identity<Ret (Class::*)(Args...) volatile&>,
+                  identity<Ret (Class::*)(Args...) volatile&&>>
 {
-  return std::tuple<identity<Ret (Class::*)(Args...) volatile&>,
-                    identity<Ret (Class::*)(Args...) volatile &&>>{};
+  return {};
 }
 
 template <typename Ret, typename Class, typename... Args>
 auto ref_qualifiers(identity<Ret (Class::*)(Args...) const volatile>)
+    -> std::tuple<identity<Ret (Class::*)(Args...) const volatile&>,
+                  identity<Ret (Class::*)(Args...) const volatile&&>>
 {
-  return std::tuple<identity<Ret (Class::*)(Args...) const volatile&>,
-                    identity<Ret (Class::*)(Args...) const volatile&&>>{};
+  return {};
 }
 
 template <typename T>
-auto ref_qualifiers(identity<T>)
+auto ref_qualifiers(identity<T>) -> std::tuple<identity<T&>, identity<T&&>>
 {
   return std::tuple<identity<T&>, identity<T&&>>{};
 }
 
-template <typename T>
-auto all_qualifiers(identity<T> f)
+// long live c++11 ....
+template <typename T,
+          typename I = decltype(cv_qualifiers(identity<T>{})),
+          typename Love = decltype(ref_qualifiers(std::get<0>(I{}))),
+          typename Boil = decltype(ref_qualifiers(std::get<1>(I{}))),
+          typename Erpl = decltype(ref_qualifiers(std::get<2>(I{}))),
+          typename Ate = decltype(ref_qualifiers(std::get<3>(I{})))>
+auto all_qualifiers(identity<T>) -> std::tuple<
+    typename std::remove_reference<decltype(std::get<0>(Love{}))>::type,
+    typename std::remove_reference<decltype(std::get<1>(Love{}))>::type,
+    typename std::remove_reference<decltype(std::get<0>(Boil{}))>::type,
+    typename std::remove_reference<decltype(std::get<1>(Boil{}))>::type,
+    typename std::remove_reference<decltype(std::get<0>(Erpl{}))>::type,
+    typename std::remove_reference<decltype(std::get<1>(Erpl{}))>::type,
+    typename std::remove_reference<decltype(std::get<0>(Ate{}))>::type,
+    typename std::remove_reference<decltype(std::get<1>(Ate{}))>::type>
 {
-  auto a = cv_qualifiers(f);
-  // make_index_sequence would work, but no need
-  auto b = ref_qualifiers(std::get<0>(a));
-  auto c = ref_qualifiers(std::get<1>(a));
-  auto d = ref_qualifiers(std::get<2>(a));
-  auto e = ref_qualifiers(std::get<3>(a));
-
-  return std::make_tuple(std::get<0>(b),
-                         std::get<1>(b),
-                         std::get<0>(c),
-                         std::get<1>(c),
-                         std::get<0>(d),
-                         std::get<1>(d),
-                         std::get<0>(e),
-                         std::get<1>(e));
+  return {};
 }
 
 template <typename... Args>
