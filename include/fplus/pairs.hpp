@@ -56,8 +56,7 @@ template <typename Tag,
 constexpr bool trigger_static_asserts()
 {
   // don't perform arity checks if function_traits<F> doesn't exist
-  (void)arity_static_asserts<Tag, F, Args...>{};
-  return true;
+  return ( arity_static_asserts<Tag, F, Args...>{} ), true;
 }
 
 template <typename,
